@@ -165,7 +165,7 @@ def _download_and_save_thumb(url: str, slug: str) -> str | None:
 
 def _fetch_content_thumbnail(article: dict) -> dict:
     """
-    Find a thumbnail relevant to the article TITLE (not the source).
+     a thumbnail relevant to the article TITLE (not the source).
     Search order:
       1. og:image from the article page itself (if it looks article-specific)
       2. DuckDuckGo image search on article title keywords

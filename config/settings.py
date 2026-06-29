@@ -108,13 +108,6 @@ RSS_FEEDS = [
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🌐  WEB SCRAPE TARGETS
-
-# KEPT sources that publish genuine IT/tech news events:
-#   ✓ STPI                        → govt IT park announcements
-#   ✓ punemirror.com/technology/  → tech section only
-#   ✓ punekarnews.in/business/    → Pune IT business news (filtered by LLM)
-#   ✓ IndustryWeek tech/IIoT      → Industry 4.0, smart factory, IIoT
-#   ✓ Automation.com              → industrial automation & robotics
 # ─────────────────────────────────────────────────────────────────────────────
 SCRAPE_TARGETS = [
     # --- STPI (Software Technology Parks of India) ---

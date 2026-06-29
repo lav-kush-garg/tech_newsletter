@@ -1,11 +1,5 @@
 """
 Database — SQLite helper.
-
-FIX: DB_PATH is now resolved relative to the project root (this file's parent/parent),
-so 'data/newsletter.db' always points to the same file regardless of the working
-directory the pipeline is launched from.  This was the root cause of sent-article
-deduplication not working — the pipeline was creating a fresh DB in a different
-location each run.
 """
 
 import sqlite3
