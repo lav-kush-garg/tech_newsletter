@@ -165,10 +165,10 @@ def _download_and_save_thumb(url: str, slug: str) -> str | None:
 
 def _fetch_content_thumbnail(article: dict) -> dict:
     """
-     a thumbnail relevant to the article TITLE (not the source).
-    Search order:
-      1. og:image from the article page itself (if it looks article-specific)
-      2. DuckDuckGo image search on article title keywords
+    Fetch a thumbnail relevant to the article.
+    Priority order:
+      1. og:image from the article page itself (BEST — article-specific)
+      2. DuckDuckGo image search on article title keywords (fallback)
     Saves result to generated_cards/ and stores path in article["thumb_path"].
     """
     title = (article.get("title") or "").strip()
@@ -185,44 +185,47 @@ def _fetch_content_thumbnail(article: dict) -> dict:
 
     saved = None
 
-    # ── 1. Try og:image from the article page ───────────────────────────────
+    # ── 1. PRIORITY 1: Try og:image from the article page (USE THIS FIRST!) ──
     og_url = article.get("image_url", "")
     if og_url and not og_url.startswith("data:"):
         og_lower = og_url.lower()
-        # Only use og:image if it doesn't look like a site logo/default
+
+        # STRICT: Reject only obvious logos/icons/defaults
         logo_signals = ["logo", "icon", "favicon", "avatar", "placeholder",
-                        "default", "fallback", "banner-default", "og-default",
-                        "site-image", "header", "watermark"]
+                        "default-image", "fallback", "og-default",
+                        "site-logo", "header-logo", "banner-logo", "watermark"]
         is_logo = any(s in og_lower for s in logo_signals)
+
         if not is_logo:
             saved = _download_and_save_thumb(og_url, slug)
             if saved:
-                logger.debug(f"[Enricher] og:image used for: {title[:50]}")
+                logger.info(f"[Enricher] ✅ Using article's og:image: {title[:50]}")
+                article["thumb_path"] = saved
+                return article
+            else:
+                logger.debug(f"[Enricher] og:image validation failed (too small/wrong aspect): {og_url[:80]}")
 
-    # ── 2. Fall back to DDG image search on article title ───────────────────
-    if not saved:
-        keywords = _build_search_keywords(title)
-        if keywords:
-            img_url = _search_ddg_image(keywords)
-            if img_url:
-                saved = _download_and_save_thumb(img_url, slug)
-                if saved:
-                    logger.debug(f"[Enricher] DDG image found for: {title[:50]}")
+    # ── 2. FALLBACK: DuckDuckGo image search on article title ────────────────
+    keywords = _build_search_keywords(title)
+    if keywords:
+        logger.debug(f"[Enricher] og:image missing/invalid. Searching DDG for: {keywords}")
+        img_url = _search_ddg_image(keywords)
+        if img_url:
+            saved = _download_and_save_thumb(img_url, slug)
+            if saved:
+                logger.info(f"[Enricher] ✅ DDG image found for: {title[:50]}")
+                article["thumb_path"] = saved
+                return article
 
-    if saved:
-        article["thumb_path"] = saved
-    else:
-        article["thumb_path"] = ""
-        logger.debug(f"[Enricher] No thumb found for: {title[:50]}")
+    # ── 3. No thumbnail found ─────────────────────────────────────────────────
+    article["thumb_path"] = ""
+    logger.debug(f"[Enricher] ⚠️  No thumbnail (og:image + DDG) for: {title[:50]}")
 
     return article
 
 
-def _fetch_article_content(article: dict) -> dict:
-    """
-    Fetch full text + image for a single article.
-    Returns the same dict with 'content', 'image_url', and 'thumb_path' filled in.
-    """
+def _fetch_article_content(article: dict, fetch_thumbnail: bool = False) -> dict:
+
     url = article.get("url", "")
     if not url:
         return article
@@ -282,8 +285,9 @@ def _fetch_article_content(article: dict) -> dict:
         logger.debug(f"[Enricher] Could not fetch content for {url}: {e}")
         article["content"] = article.get("summary", "")
 
-    # ── 6. Fetch content-relevant thumbnail ───────────────────────────────────
-    article = _fetch_content_thumbnail(article)
+    # ── 6. Fetch thumbnail ONLY if requested ──────────────────────────────────
+    if fetch_thumbnail:
+        article = _fetch_content_thumbnail(article)
 
     return article
 
@@ -295,12 +299,40 @@ def _clean_text(text: str) -> str:
     return text.strip()
 
 
-def enrich_articles(articles: list[dict], max_workers: int = 8) -> list[dict]:
+def generate_thumbnails_for_articles(articles: list[dict], max_workers: int = 8) -> list[dict]:
     """
-    Fetch full content for all articles in parallel.
-    Returns the same list with 'content' and 'thumb_path' fields populated.
+    Generate thumbnails ONLY for provided articles.
+    This is called after filtering/scoring to create thumbnails for final articles only.
     """
+    if not articles:
+        return articles
+
+    logger.info(f"[Enricher] Generating thumbnails for {len(articles)} final articles...")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch_content_thumbnail, art): art for art in articles}
+        results = []
+        for future in as_completed(futures):
+            try:
+                results.append(future.result())
+            except Exception as e:
+                logger.error(f"[Enricher] Thumbnail error: {e}")
+
+    # Sort back to original order
+    url_order = {art["url"]: i for i, art in enumerate(articles)}
+    results.sort(key=lambda a: url_order.get(a["url"], 9999))
+
+    thumbnail_count = sum(1 for a in results if a.get('thumb_path'))
+    logger.info(f"[Enricher] ✅ Generated thumbnails for {thumbnail_count}/{len(results)} articles")
+
+    return results
+
+
+def enrich_articles(articles: list[dict], max_workers: int = 8, skip_thumbnails: bool = False) -> list[dict]:
+  
     logger.info(f"[Enricher] Fetching full content for {len(articles)} articles...")
+    if skip_thumbnails:
+        logger.info(f"[Enricher] Thumbnail generation SKIPPED (will be generated later for final articles only)")
 
     enriched = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -317,6 +349,9 @@ def enrich_articles(articles: list[dict], max_workers: int = 8) -> list[dict]:
 
     logger.info(f"[Enricher] Content fetched. Articles with body text: "
                 f"{sum(1 for a in enriched if len(a.get('content','')) > 200)}")
-    logger.info(f"[Enricher] Articles with thumbnails: "
-                f"{sum(1 for a in enriched if a.get('thumb_path'))}")
+
+    if not skip_thumbnails:
+        logger.info(f"[Enricher] Articles with thumbnails: "
+                    f"{sum(1 for a in enriched if a.get('thumb_path'))}")
+
     return enriched

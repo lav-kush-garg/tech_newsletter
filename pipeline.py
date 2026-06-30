@@ -49,7 +49,8 @@ def run_pipeline(dry_run: bool = False, no_send: bool = False) -> dict:
     if not all_raw:
         return {"status": "no_articles", "fetched": 0, "sent": 0}
 
-    enriched = enrich_articles(all_raw, max_workers=8)
+  
+    enriched = enrich_articles(all_raw, max_workers=8, skip_thumbnails=True)
     shortlist = run_preflight_pipeline(enriched)
 
     if dry_run:
@@ -58,6 +59,11 @@ def run_pipeline(dry_run: bool = False, no_send: bool = False) -> dict:
     final_articles = score_all_articles(shortlist)
     if not final_articles:
         return {"status": "no_articles_passed", "fetched": len(all_raw), "sent": 0}
+
+    # ── NOW generate thumbnails  for final articles ───────────────────────
+    logger.info(f"[Pipeline] Generating thumbnails for {len(final_articles)} final articles...")
+    from fetchers.content_enricher import generate_thumbnails_for_articles
+    final_articles = generate_thumbnails_for_articles(final_articles, max_workers=8)
 
     # Generate the cards
     clear_old_cards()

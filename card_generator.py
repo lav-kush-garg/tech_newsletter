@@ -5,21 +5,23 @@ Generates PNG card images (826x241) and dynamically builds header/badge assets.
 """
 
 import os
+import re
 import hashlib
 import logging
 import requests
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 
 logger = logging.getLogger(__name__)
 
 # ── Card dimensions ───────────────────────────────────────────────────────────
 CARD_W    = 826
-CARD_H    = 241
-THUMB_W   = 241   # square thumbnail matching the height
-THUMB_H   = 241
+CARD_H    = 290   # increased from 241 — gives the summary room for an extra
+                   # full line so fewer sentences ever need to be dropped
+THUMB_W   = 290   # square thumbnail matching the height
+THUMB_H   = 290
 PAD       = 24    # padding around text area
 
 OUTPUT_DIR = Path("generated_cards")
@@ -136,27 +138,81 @@ def _th(draw, text, font):
     except Exception:
         return 14
 
-def _wrap(draw, text, font, max_w, max_lines=3):
+def _plain_wrap(draw, text, font, max_w, max_lines):
+  
     words = text.split()
-    lines, line = [], ""
+    lines = []
+    current = ""
     for word in words:
-        test = (line + " " + word).strip()
+        test = (current + " " + word).strip()
         if _tw(draw, test, font) <= max_w:
-            line = test
+            current = test
         else:
-            if line:
-                lines.append(line)
+            if current:
+                lines.append(current)
                 if len(lines) >= max_lines:
-                    break
-            line = word
-    if line and len(lines) < max_lines:
-        lines.append(line)
-    if len(lines) == max_lines:
-        last = lines[-1]
-        while last and _tw(draw, last + "…", font) > max_w:
-            last = last.rsplit(" ", 1)[0]
-        lines[-1] = last + "…" if last != lines[-1] else lines[-1]
+                    return lines[:max_lines]
+            else:
+                # single word too long for a line — hard truncate it
+                truncated = word
+                while truncated and _tw(draw, truncated + "…", font) > max_w:
+                    truncated = truncated[:-1]
+                lines.append((truncated + "…") if truncated else "…")
+                if len(lines) >= max_lines:
+                    return lines[:max_lines]
+                current = ""
+                continue
+            current = word
+    if current and len(lines) < max_lines:
+        lines.append(current)
+    return lines[:max_lines]
+
+
+def _count_wrapped_lines(draw, text, font, max_w) -> int:
+    
+    return len(_plain_wrap(draw, text, font, max_w, max_lines=999))
+
+
+def _wrap(draw, text, font, max_w, max_lines=3):
+
+    if not text:
+        return []
+    text = text.strip()
+    words = text.split()
+    lines = _plain_wrap(draw, text, font, max_w, max_lines)
+    consumed_words = len(" ".join(lines).split())
+    if consumed_words >= len(words):
+        return lines
+    if lines:
+        last = lines[-1].rstrip(' ,;:-')
+        lines[-1] = last + '…'
     return lines
+
+
+def _wrap_sentences(draw, text, font, max_w, max_lines=3):
+
+    if not text:
+        return []
+
+    text = text.strip()
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    if not sentences:
+        return []
+
+    accepted = ""
+    for s in sentences:
+        candidate = (accepted + " " + s).strip() if accepted else s
+        if _count_wrapped_lines(draw, candidate, font, max_w) <= max_lines:
+            accepted = candidate
+        else:
+            break
+
+    if accepted:
+        return _plain_wrap(draw, accepted, font, max_w, max_lines)
+
+    
+    return _wrap(draw, sentences[0], font, max_w, max_lines)
 
 
 # ── Brand/logo signal words — if these appear in the image URL, reject it ────
@@ -187,10 +243,7 @@ _BRAND_DOMAIN_MAP = {
 
 
 def _image_url_is_valid(img_url: str, article_source: str) -> bool:
-    """
-    Returns False if the image URL is a logo/icon or belongs to a brand
-    that does NOT match the article source — stops cross-brand thumbnail pollution.
-    """
+
     if not img_url:
         return False
 
@@ -240,10 +293,8 @@ def _download_thumb(url: str, article_source: str = "") -> Image.Image | None:
         if img.width < 200 or img.height < 150:
             logger.debug(f"[CardGen] Rejected tiny image {img.width}x{img.height}: {url}")
             return None
-
-        # Reject extreme aspect ratios — banners, strips, icons
         aspect = img.width / max(img.height, 1)
-        if aspect < 0.5 or aspect > 5.0:
+        if aspect < 0.6 or aspect > 2.2:
             logger.debug(f"[CardGen] Rejected odd-aspect image {img.width}x{img.height}: {url}")
             return None
 
@@ -256,12 +307,31 @@ def _download_thumb(url: str, article_source: str = "") -> Image.Image | None:
 def _make_thumb(img: Image.Image | None, source: str) -> Image.Image:
     if img:
         w, h = img.size
+        aspect = w / max(h, 1)
+        if 0.85 <= aspect <= 1.18:
+            side = min(w, h)
+            left = (w - side) // 2
+            top  = (h - side) // 2
+            cropped = img.crop((left, top, left + side, top + side))
+            return cropped.resize((THUMB_W, THUMB_H), Image.LANCZOS)
+       
         side = min(w, h)
-        left = (w - side) // 2
-        top  = max(0, (h - side) // 4)
-        img  = img.crop((left, top, left + side, top + side))
-        return img.resize((THUMB_W, THUMB_H), Image.LANCZOS)
-    
+        bg_left = (w - side) // 2
+        bg_top  = (h - side) // 2
+        bg = img.crop((bg_left, bg_top, bg_left + side, bg_top + side))
+        bg = bg.resize((THUMB_W, THUMB_H), Image.LANCZOS)
+        bg = bg.filter(ImageFilter.GaussianBlur(22))
+        bg = ImageEnhance.Brightness(bg).enhance(0.55)
+
+        scale  = min(THUMB_W / w, THUMB_H / h)
+        new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+        fitted = img.resize((new_w, new_h), Image.LANCZOS)
+
+        paste_x = (THUMB_W - new_w) // 2
+        paste_y = (THUMB_H - new_h) // 2
+        bg.paste(fitted, (paste_x, paste_y))
+        return bg
+
     fb = Image.new("RGB", (THUMB_W, THUMB_H), C_THUMB_BG)
     d  = ImageDraw.Draw(fb)
     for x in range(0, THUMB_W + THUMB_H, 30):
@@ -286,11 +356,7 @@ def _gradient_rect(draw, x0, y0, x1, y1, c_left, c_right):
 
 def _draw_badge(img: Image.Image, cat: str, label: str):
     """
-    Draws a colourful gradient badge with:
-    - Horizontal gradient background (dark left → slightly lighter right)
-    - Bright left accent bar (8px)
-    - LEFT-ALIGNED bold uppercase label text
-    - NO emoji (avoids font rendering issues)
+    Draws a colourful gradient badge 
     """
     draw = ImageDraw.Draw(img)
     c_left, c_right, c_accent, c_text = CATEGORY_COLORS.get(cat, DEFAULT_COLORS)
@@ -365,20 +431,28 @@ def generate_card(article: dict) -> str | None:
         card = Image.new("RGB", (CARD_W, CARD_H), C_BG)
         draw = ImageDraw.Draw(card)
 
-        # Priority 1: pre-fetched content-relevant thumbnail saved by content_enricher
+        # Thumbnail priority:
+        # 1. Pre-fetched content-relevant thumbnail (best — article-specific image)
+        # 2. Fallback: try to download from image_url (may be generic)
+        raw_thumb = None
+        
         thumb_path = article.get("thumb_path", "")
-        raw_thumb  = None
         if thumb_path and Path(thumb_path).exists():
             try:
                 from PIL import Image as _PIL_Image
                 raw_thumb = _PIL_Image.open(thumb_path).convert("RGB")
-                logger.debug(f"[CardGen] Using pre-fetched thumb: {thumb_path}")
-            except Exception:
+                logger.info(f"[CardGen] ✅ Using pre-fetched thumbnail: {thumb_path}")
+            except Exception as e:
+                logger.debug(f"[CardGen] Pre-fetched thumb load failed: {e}")
                 raw_thumb = None
 
-        # Priority 2: fallback — download from image_url (less reliable)
+        # Only fallback to image_url download if we don't have a pre-fetched thumb
         if raw_thumb is None:
-            raw_thumb = _download_thumb(article.get("image_url", ""), source)
+            img_url = article.get("image_url", "")
+            if img_url:
+                raw_thumb = _download_thumb(img_url, source)
+                if raw_thumb:
+                    logger.info(f"[CardGen] Using fallback image_url: {img_url[:80]}")
 
         thumb = _make_thumb(raw_thumb, source)
         card.paste(thumb, (0, 0))
@@ -399,7 +473,7 @@ def generate_card(article: dict) -> str | None:
             y += title_lh
         y += 8
 
-        sum_lines = _wrap(draw, summary, f["summary"], max_tw, max_lines=3)
+        sum_lines = _wrap_sentences(draw, summary, f["summary"], max_tw, max_lines=4)
         sum_lh    = _th(draw, "Ag", f["summary"]) + 6
         for line in sum_lines:
             draw.text((tx, y), line, font=f["summary"], fill=C_SUMMARY)
