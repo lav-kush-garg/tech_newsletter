@@ -16,7 +16,7 @@ load_dotenv()
 SCHEDULE_TIMES = ["08:00",]   # ← Change newsletter delivery times here
 TIMEZONE       = "Asia/Kolkata"        # ← Your local timezone
 
-EMAIL_SENDER_NAME = "Tech Intelligence Desk"
+EMAIL_SENDER_NAME = "Tech News "
 
 
 # ─────────────────────────────────────────────────────────────────────────────
