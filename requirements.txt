@@ -28,3 +28,6 @@ python-dotenv>=1.0.0
 
 # ── Timezone ──────────────────────────────────────────────────────────────────
 tzdata>=2023.3           # zoneinfo database for Windows compatibility
+
+#----pillow for image generation
+Pillow>=10.4.0

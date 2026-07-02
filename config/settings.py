@@ -85,7 +85,7 @@ RSS_FEEDS = [
     {"url": "https://www.datacenterknowledge.com/rss.xml",                     "source": "DC Knowledge",         "tier": 2},
 
     # --- Cybersecurity ---
-    {"url": "https://thehackernews.com/feeds/posts/default",                   "source": "Hacker News",          "tier": 2},
+    {"url": "https://thehackernews.com/feeds/posts/default",                   "source": "Hacker News",          "tier": 2}, 
     {"url": "https://www.bleepingcomputer.com/feed/",                          "source": "BleepingComputer",     "tier": 2},
     {"url": "https://www.securityweek.com/feed/",                              "source": "SecurityWeek",         "tier": 2},
     {"url": "https://www.darkreading.com/rss.xml",                             "source": "Dark Reading",         "tier": 2},
