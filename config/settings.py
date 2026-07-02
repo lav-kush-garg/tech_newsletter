@@ -36,7 +36,7 @@ SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "")
 # 📰  NEWSLETTER LIMITS
 # ─────────────────────────────────────────────────────────────────────────────
 MAX_ARTICLES_IN_EMAIL        = 7    # ← Max cards shown in the newsletter
-MAX_ARTICLES_TO_LLM          = 35    # ← Articles sent to Groq for scoring
+MAX_ARTICLES_TO_LLM          = 50    # ← Articles sent to Groq for scoring
 NEWS_LOOKBACK_HOURS          = 24    # ← Only fetch news from the last N hours
 CONTENT_SIMILARITY_THRESHOLD = 0.72  # ← 0-1: higher = stricter duplicate detection
 

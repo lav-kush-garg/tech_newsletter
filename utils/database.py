@@ -6,6 +6,7 @@ import sqlite3
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 
 from config.settings import DB_PATH
 
@@ -14,6 +15,18 @@ logger  = logging.getLogger(__name__)
 # ── Resolve DB path relative to project root (2 levels up from utils/database.py) ──
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DB_FILE      = _PROJECT_ROOT / DB_PATH
+
+
+def _normalize_url(url: str) -> str:
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url.strip())
+        query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
+        normalized = parsed._replace(query=query, fragment="")
+        return urlunparse(normalized)
+    except Exception:
+        return url.strip()
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -174,29 +187,40 @@ def mark_articles_sent(articles: list[dict]):
     """
     if not articles:
         return
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    rows = []
+    for a in articles:
+        url = (a.get("url") or "").strip()
+        if not url:
+            logger.warning(f"[DB] Skipping sent article with missing URL: {a.get('title', 'no title')}")
+            continue
+
+        rows.append(
+            (
+                url,
+                (a.get("title", "") or "")[:500],
+                a.get("source", ""),
+                a.get("category", ""),
+                (a.get("llm_summary") or a.get("summary", "") or "")[:1000],
+                str(a.get("published_at", ""))[:30],
+                a.get("card_path", ""),
+                now,
+            )
+        )
+
+    if not rows:
+        logger.warning("[DB] No valid sent articles to mark.")
+        return
+
     try:
         with _get_conn() as conn:
-            conn.executemany(
+            cursor = conn.executemany(
                 """INSERT OR IGNORE INTO sent_articles
                    (url, title, source, category, summary, published_at, card_path, sent_at)
                    VALUES (?,?,?,?,?,?,?,?)""",
-                [
-                    (
-                        a.get("url", ""),
-                        (a.get("title", "") or "")[:500],
-                        a.get("source", ""),
-                        a.get("category", ""),
-                        (a.get("llm_summary") or a.get("summary", "") or "")[:1000],
-                        str(a.get("published_at", ""))[:30],
-                        a.get("card_path", ""),
-                        now,
-                    )
-                    for a in articles
-                    if a.get("url")   # only insert rows with a valid URL
-                ],
+                rows,
             )
-        logger.info(f"[DB] Marked {len(articles)} articles as sent.")
+            logger.info(f"[DB] Marked {cursor.rowcount} sent article records.")
     except Exception as e:
         logger.error(f"[DB] mark_articles_sent error: {e}")
 
@@ -207,7 +231,7 @@ def purge_old_articles():
     try:
         with _get_conn() as conn:
             cursor = conn.execute(
-                "DELETE FROM sent_articles WHERE datetime(sent_at) < datetime('now', '-15 days')"
+                "DELETE FROM sent_articles WHERE sent_at < datetime('now', '-15 days')"
             )
             logger.info(f"[DB] Purged {cursor.rowcount} expired records.")
     except Exception as e:
