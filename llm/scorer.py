@@ -51,6 +51,7 @@ KEEP articles about:
 - Digital transformation in enterprises or government
 - Startups in Pune or India building tech products in the above sectors
 - Connectivity: 5G, networking, edge computing
+- use cybersecurity news but not more than 1 articles per newsletter
 
 REJECT articles about:
 - Funding rounds, acquisitions, IPOs, valuations, mergers (pure financial/deal news)
