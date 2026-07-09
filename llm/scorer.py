@@ -54,6 +54,9 @@ KEEP articles about:
 - use cybersecurity news but not more than 1 articles per newsletter
 - highly news should be related to artifical intelligence, machine learning, startups in pune related to technology, and digital transformation in enterprises or government.
 
+
+
+
 REJECT articles about:
 - Funding rounds, acquisitions, IPOs, valuations, mergers (pure financial/deal news)
 - Stock prices, market cap, quarterly earnings, analyst predictions
