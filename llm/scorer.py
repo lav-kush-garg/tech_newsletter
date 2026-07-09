@@ -149,7 +149,11 @@ def score_article(article: dict) -> dict | None:
 
     article["llm_summary"] = result.get("summary", article.get("summary", ""))
     article["category"]    = result.get("category", "BIGTECH")
-    article["yes_count"]   = result.get("yes_count", 0)
+    yes_count = result.get("yes_count", 0)
+    try:
+        article["yes_count"] = int(yes_count)
+    except (ValueError, TypeError):
+        article["yes_count"] = 0
 
     geo_raw = result.get("geo_scope", "GLOBAL").upper().strip()
     if geo_raw not in ("LOCAL", "STATE", "NATIONAL", "GLOBAL"):
